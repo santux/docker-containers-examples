@@ -1,0 +1,17 @@
+services:
+  bd_demo:
+    image: postgres:18.4-bookworm
+    volumes:
+      - postgresql_data:/var/lib/postgresql
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+volumes:
+  postgresql_data: {}
