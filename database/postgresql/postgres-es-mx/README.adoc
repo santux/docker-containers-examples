@@ -1,0 +1,564 @@
+= PostgreSQL MX — Contenedor Docker
+:toc: left
+:toc-title: Contenido
+:toclevels: 3
+:source-highlighter: highlight.js
+:icons: font
+
+Imagen Docker de PostgreSQL 18 configurada con soporte nativo para el locale español México (`es_MX.UTF-8`).
+Diseñada como base para sistemas cuyo dominio de datos opera en México.
+
+== Estructura de archivos
+
+====
+[source]
+----
+contenedores/postgresql/
+├── Dockerfile              <1>
+├── dc_postgresql_mx.yml    <2>
+├── .env                    <3>
+└── README.adoc
+----
+<1> Definición de la imagen personalizada.
+<2> Compose file para levantar el servicio en desarrollo.
+<3> Variables de entorno (no se versiona).
+====
+
+== Cómo funciona la configuración de locale en PostgreSQL
+
+=== La cadena de herencia
+
+Establecer `LANG=es_MX.utf8` a nivel de imagen, contenedor o Docker Compose tiene un efecto en cadena que configura automáticamente tanto el sistema operativo del contenedor como la instancia de PostgreSQL:
+
+====
+[source]
+----
+localedef (Dockerfile)          <1>
+    ↓
+LANG=es_MX.utf8 (env var)       <2>
+    ↓
+initdb lee LANG al inicializar  <3>
+    ↓
+Cluster PostgreSQL configurado  <4>
+    ↓
+Bases de datos heredan del cluster
+    ↓
+Tablas y columnas heredan de la base de datos
+----
+<1> Compila y registra el locale en el sistema operativo del contenedor.
+<2> Activa ese locale como predeterminado del proceso.
+<3> Solo ocurre en el primer arranque, cuando el directorio de datos está vacío.
+<4> `lc_collate`, `lc_ctype` y `encoding` quedan fijos para el cluster.
+====
+
+=== Prerequisito: `localedef` en el Dockerfile
+
+El paso `RUN localedef ...` en el `Dockerfile` es **indispensable**. Las imágenes oficiales de PostgreSQL se basan en Debian Bookworm slim, que no incluye locales distintos al inglés precompilados. Sin este paso, cualquier intento de activar `es_MX.UTF-8` — ya sea vía `LANG`, `POSTGRES_INITDB_ARGS` o `CREATE DATABASE` — fallaría con:
+
+[source]
+----
+initdb: error: invalid locale name: "es_MX.utf8"
+----
+
+`localedef` compila la definición del locale y la registra en el sistema operativo del contenedor, haciendo que esté disponible para todos los procesos, incluido `initdb`.
+
+=== Niveles donde se puede establecer `LANG`
+
+[cols="1,2,2"]
+|===
+|Nivel |Cómo se define |Efecto
+
+|*Imagen Docker* (`ENV` en Dockerfile)
+|`ENV LANG es_MX.utf8`
+|El locale queda fijo en la imagen. Cualquier contenedor creado a partir de ella tendrá `es_MX.utf8` sin configuración adicional. Es la opción más rígida pero más garantizada.
+
+|*Contenedor* (`docker run`)
+|`docker run -e LANG=es_MX.utf8 ...`
+|El locale se establece solo para esa ejecución. La imagen base puede ser genérica.
+
+|*Docker Compose* (`environment` en el service)
+|`LANG: ${LANG}` leído desde `.env`
+|Mismo efecto que a nivel contenedor, pero gestionado de forma declarativa. Es el enfoque usado en este proyecto.
+|===
+
+Los tres niveles producen el mismo resultado en PostgreSQL siempre que la variable esté presente **antes de que `initdb` se ejecute**.
+
+=== Qué configura `LANG` en PostgreSQL automáticamente
+
+Cuando `initdb` lee `LANG=es_MX.utf8` del entorno, establece los siguientes parámetros del cluster sin necesidad de `POSTGRES_INITDB_ARGS`:
+
+[cols="1,1,2"]
+|===
+|Parámetro |Valor resultante |Impacto
+
+|`lc_collate`
+|`es_MX.utf8`
+|Orden de cadenas de texto: `ñ` después de `n`, acentos correctos.
+
+|`lc_ctype`
+|`es_MX.utf8`
+|Clasificación de caracteres: mayúsculas, minúsculas, dígitos con soporte UTF-8 completo.
+
+|`lc_messages`
+|`es_MX.utf8`
+|Idioma de los mensajes de error y log de PostgreSQL (español).
+
+|`lc_monetary`
+|`es_MX.utf8`
+|Formato monetario: símbolo `$`, separadores de miles y decimales en estilo México.
+
+|`lc_numeric`
+|`es_MX.utf8`
+|Formato numérico: punto decimal y separador de miles.
+
+|`lc_time`
+|`es_MX.utf8`
+|Formato de fechas y horas en español México.
+
+|`encoding`
+|`UTF8`
+|Encoding del cluster, derivado de la parte `.utf8` del locale.
+|===
+
+=== Herencia hacia bases de datos y tablas
+
+[source,sql]
+----
+-- Una base de datos creada sin especificar collation hereda del cluster:
+CREATE DATABASE direcciones_postales;
+-- → lc_collate = es_MX.utf8, lc_ctype = es_MX.utf8, encoding = UTF8
+
+-- Una tabla hereda de la base de datos:
+CREATE TABLE municipio (nombre TEXT);
+-- → columna 'nombre' usa collation es_MX.utf8 por defecto
+
+-- Se puede sobreescribir por columna si se necesita ICU (recomendado PG 16+):
+CREATE TABLE municipio (nombre TEXT COLLATE "es-x-icu");
+----
+
+=== `LANG` vs `POSTGRES_INITDB_ARGS` — comparativa
+
+Es posible prescindir de `LANG` y usar únicamente `POSTGRES_INITDB_ARGS` para configurar el cluster:
+
+[source,yaml]
+----
+environment:
+  POSTGRES_INITDB_ARGS: '--encoding=UTF-8 --lc-collate=es_MX.utf8 --lc-ctype=es_MX.utf8'
+----
+
+La diferencia es de **alcance y profundidad**:
+
+[cols="2,1,1"]
+|===
+|Parámetro de locale |`LANG=es_MX.utf8` |Solo `POSTGRES_INITDB_ARGS` (con esas 3 flags)
+
+|`lc_collate` (orden de texto)
+|✅ `es_MX.utf8`
+|✅ `es_MX.utf8`
+
+|`lc_ctype` (clasificación de caracteres)
+|✅ `es_MX.utf8`
+|✅ `es_MX.utf8`
+
+|`encoding`
+|✅ `UTF8` (derivado del locale)
+|✅ `UTF8` (explícito)
+
+|`lc_messages` (idioma de errores y logs)
+|✅ Español México
+|❌ Default del sistema (`C` / inglés)
+
+|`lc_monetary` (formato monetario)
+|✅ Estilo México (`$1,234.56`)
+|❌ Default del sistema
+
+|`lc_numeric` (formato numérico)
+|✅ Estilo México
+|❌ Default del sistema
+
+|`lc_time` (formato de fechas)
+|✅ Español México
+|❌ Default del sistema
+
+|Afecta el proceso PostgreSQL en runtime
+|✅ Sí
+|❌ No — solo actúa en `initdb`
+|===
+
+NOTE: Para la integridad de los datos (almacenamiento, ordenamiento, búsquedas) los parámetros críticos son `lc_collate`, `lc_ctype` y `encoding`. Los demás (`lc_messages`, `lc_monetary`, `lc_numeric`, `lc_time`) afectan presentación y mensajes, no la forma en que los datos se almacenan.
+
+Si el único objetivo es que el cluster ordene y clasifique texto correctamente en español México, `POSTGRES_INITDB_ARGS` con esas tres flags es suficiente. Si además se necesita que los mensajes de error y los formatos de presentación estén en español México, la opción completa es `LANG=es_MX.utf8`.
+
+También es válido combinar ambos: usar `LANG` para el proceso en general y `POSTGRES_INITDB_ARGS` para ser explícito sobre la intención del cluster, haciendo el `Dockerfile` o el compose autoexplicativo para quien lo lea.
+
+=== Cuándo `LANG` ya no tiene efecto sobre el collation
+
+IMPORTANT: Una vez que `initdb` corre y el directorio de datos queda inicializado, el collation del cluster está **fijo**. Cambiar `LANG` después de ese momento no modifica `lc_collate` ni `lc_ctype` del cluster existente. Sí seguiría afectando cosas de proceso como el idioma de los mensajes de error. Para cambiar el collation de un cluster existente se requiere `pg_upgrade` o dump/restore.
+
+== Mejor práctica: servidor neutral, locale explícito por base de datos
+
+=== El principio
+
+La mejor práctica profesional es mantener el **servidor y el cluster de PostgreSQL en inglés** (`C.UTF-8` o `en_US.UTF-8`) y especificar el locale español México **únicamente al crear cada base de datos**. Esta separación respeta una regla fundamental:
+
+____
+El locale del servidor es una decisión de *infraestructura*. +
+El locale de la base de datos es una decisión del *dominio de negocio*.
+____
+
+=== Por qué el servidor debe estar en inglés
+
+[cols="1,3"]
+|===
+|Razón |Explicación
+
+|*Logs y errores googleables*
+|`ERROR: duplicate key value violates unique constraint` aparece en Stack Overflow, documentación oficial y tickets de soporte. El mismo error en español no tiene resultados útiles en buscadores.
+
+|*Herramientas de monitoreo*
+|Datadog, Grafana, ELK Stack, Cloud Logging de GCP parsean y generan alertas sobre patrones de texto en inglés. Los logs en español rompen expresiones regulares de alertas.
+
+|*Trabajo en equipo*
+|Cualquier DBA, SRE o ingeniero de soporte — independientemente de su idioma — puede leer un log en inglés.
+
+|*Soporte del proveedor*
+|Google Cloud, AWS y Azure asumen logs en inglés en sus herramientas de diagnóstico y soporte técnico.
+|===
+
+=== La estrategia correcta
+
+[source]
+----
+Cluster (initdb)  →  C.UTF-8 o en_US.UTF-8     ← infraestructura, neutral, en inglés
+      ↓
+CREATE DATABASE   →  es_MX.UTF-8                ← decisión de negocio, explícita
+      ↓
+Columnas TEXT     →  COLLATE "es-x-icu"         ← control fino donde se necesita
+----
+
+=== Crear la base de datos con locale español México
+
+Cuando el cluster está en inglés, el locale se especifica en el `CREATE DATABASE`. Es obligatorio usar `TEMPLATE template0`:
+
+[source,sql]
+----
+CREATE DATABASE direcciones_postales
+  ENCODING   'UTF8'
+  LC_COLLATE 'es_MX.UTF-8'
+  LC_CTYPE   'es_MX.UTF-8'
+  TEMPLATE   template0;
+----
+
+IMPORTANT: `TEMPLATE template0` es obligatorio. `template1` (el template por defecto) ya tiene el collation del cluster grabado y no permite crearse con un collation distinto. `template0` es una plantilla limpia sin ese candado.
+
+=== El rol de `localedef` en esta estrategia
+
+Aunque el cluster permanezca en inglés, el paso `localedef` en el `Dockerfile` sigue siendo **indispensable**. Sin él, el locale `es_MX.UTF-8` no existe en el sistema operativo del contenedor y `CREATE DATABASE` fallaría:
+
+[source]
+----
+ERROR: invalid locale name: "es_MX.UTF-8"
+----
+
+`localedef` no activa el locale — lo *registra* en el sistema para que esté disponible cuando se necesite, ya sea en `initdb` o en `CREATE DATABASE`.
+
+=== Comparativa de enfoques
+
+[cols="2,1,1,1"]
+|===
+|Característica |Cluster en `es_MX` |`POSTGRES_INITDB_ARGS` |*Mejor práctica* (`CREATE DATABASE`)
+
+|Locale del servidor
+|`es_MX.utf8`
+|`es_MX.utf8`
+|`C.UTF-8` ✅
+
+|Logs de PostgreSQL
+|Español ❌
+|Español/inglés parcial ⚠️
+|Inglés ✅
+
+|Locale de la base de datos
+|Heredado automáticamente
+|Heredado automáticamente
+|Explícito en `CREATE DATABASE` ✅
+
+|Requiere `TEMPLATE template0`
+|No
+|No
+|Sí
+
+|Separación infraestructura/negocio
+|❌
+|⚠️
+|✅
+
+|Recomendado para producción
+|No
+|No
+|*Sí*
+|===
+
+== Imagen personalizada — `Dockerfile`
+
+[source,dockerfile]
+----
+FROM postgres:18.4-bookworm
+RUN localedef -i es_MX -c -f UTF-8 -A /usr/share/locale/locale.alias es_MX.UTF-8
+----
+
+=== Explicación por capa
+
+[cols="1,3"]
+|===
+|Instrucción |Propósito
+
+|`FROM postgres:18.4-bookworm`
+|Imagen base oficial de PostgreSQL 18.4 sobre Debian Bookworm (Debian 12). La versión está fijada para garantizar reproducibilidad en los builds.
+
+|`RUN localedef ...`
+|Registra el locale `es_MX.UTF-8` en el sistema operativo del contenedor. Las imágenes oficiales de PostgreSQL no incluyen locales distintos al inglés. Sin este paso, `CREATE DATABASE ... LC_COLLATE 'es_MX.UTF-8'` fallaría aunque el cluster esté en inglés. No activa el locale — lo hace disponible para cuando se necesite.
+
+Flags utilizados:
+
+* `-i es_MX` — definición de idioma/región de entrada.
+* `-c` — continúa ignorando advertencias menores.
+* `-f UTF-8` — charset de salida.
+* `-A /usr/share/locale/locale.alias` — archivo de alias de locales del sistema.
+|===
+
+=== Construir la imagen
+
+[source,zsh]
+----
+docker build -t postgres-mx:18.4 .
+----
+
+Ejecutar desde el directorio `contenedores/postgresql/`.
+
+== Servicio Docker Compose — `dc_postgresql_mx.yml`
+
+[source,yaml]
+----
+services:
+  bd_demo:
+    image: postgres-mx:18.4
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+----
+
+=== Configuración del servicio
+
+[cols="1,1,3"]
+|===
+|Propiedad |Valor |Descripción
+
+|`image`
+|`postgres-mx:18.4`
+|Imagen local construida desde el `Dockerfile` de este mismo directorio. Debe existir antes de ejecutar `docker compose up`.
+
+|`restart`
+|`always`
+|El contenedor se reinicia automáticamente ante fallos o reinicios del host. Adecuado para entornos de desarrollo persistente.
+
+|`ports`
+|`5432:5432`
+|Expone el puerto estándar de PostgreSQL en el host. Para mayor seguridad en redes compartidas usar `127.0.0.1:5432:5432`.
+|===
+
+=== Variables de entorno
+
+Las variables se leen desde el archivo `.env` ubicado en el mismo directorio. Docker Compose lo carga automáticamente sin necesidad de indicar `--env-file`.
+
+[cols="1,1,3"]
+|===
+|Variable |Default en `.env` |Descripción
+
+|`POSTGRES_PASSWORD`
+|`demo`
+|Contraseña del usuario principal. *Cambiar en cualquier entorno no local.*
+
+|`POSTGRES_USER`
+|`demo`
+|Nombre del usuario/rol que PostgreSQL crea como superusuario del cluster. Si se omite, el valor por defecto es `postgres`.
+
+|`POSTGRES_DB`
+|`demodb`
+|Nombre de la base de datos que se crea automáticamente al inicializar el cluster. Si se omite, toma el valor de `POSTGRES_USER`.
+
+|`POSTGRES_INITDB_ARGS` _(comentado)_
+|—
+|Argumentos adicionales para `initdb`. Configura el cluster completo con locale español México. +
+*Nota:* En producción se prefiere dejar el cluster neutral y especificar el locale en `CREATE DATABASE`. Ver sección <<_mejor_práctica_servidor_neutral_locale_explícito_por_base_de_datos>>.
+
+|`TZ`
+|`America/Mexico_City`
+|Zona horaria del proceso dentro del contenedor. Los logs y `now()` reflejan hora local de México (CST/CDT). No afecta el collation ni el encoding del cluster.
+
+|`LANG`
+|`es_MX.utf8`
+|Locale del proceso del contenedor. Afecta el idioma de los mensajes de error de PostgreSQL y los formatos de presentación (fecha, moneda, números). *No es el mecanismo recomendado para configurar el collation de las bases de datos* — para eso usar `CREATE DATABASE ... LC_COLLATE 'es_MX.UTF-8' TEMPLATE template0`.
+|===
+
+=== Healthcheck
+
+[source,yaml]
+----
+healthcheck:
+  test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+----
+
+Utiliza `pg_isready`, utilitario incluido en todas las imágenes oficiales de PostgreSQL, para verificar que el servidor acepta conexiones.
+
+* `$$POSTGRES_USER` — el doble `$$` es el escape de Docker Compose para pasar un `$` literal al shell del contenedor, donde se resuelve como la variable de entorno `POSTGRES_USER`.
+* `-d $$POSTGRES_DB` — necesario cuando `POSTGRES_USER` y `POSTGRES_DB` tienen nombres distintos; sin este flag `pg_isready` intenta conectarse a una base de datos con el mismo nombre que el usuario.
+
+Servicios dependientes pueden usar `condition: service_healthy` para esperar a que PostgreSQL esté listo antes de iniciar.
+
+=== Persistencia de datos _(opcional)_
+
+El bloque de volumen está comentado en el compose file. Al activarlo, los datos sobreviven a `docker compose down` y rebuilds de la imagen.
+
+[source,yaml]
+----
+volumes:
+  - postgresql_mx_data:/var/lib/postgresql
+
+# Al final del archivo:
+volumes:
+  postgresql_mx_data: {}
+----
+
+IMPORTANT: A partir de PostgreSQL 18 las imágenes Docker almacenan los datos en subdirectorios con nombre de versión mayor (compatible con `pg_ctlcluster`). Un volumen inicializado con PG 17 **no es compatible** con PG 18 y viceversa. La migración requiere `pg_upgrade` o dump/restore.
+
+== Archivo `.env`
+
+[source,properties]
+----
+POSTGRES_PASSWORD=demo
+POSTGRES_USER=demo
+POSTGRES_DB=demodb
+TZ=America/Mexico_City
+LANG=es_MX.utf8
+----
+
+[cols="1,1,3"]
+|===
+|Variable |Valor |Descripción
+
+|`POSTGRES_PASSWORD`
+|`demo`
+|Contraseña del usuario principal. *Cambiar en cualquier entorno no local.*
+
+|`POSTGRES_USER`
+|`demo`
+|Usuario/rol principal del cluster.
+
+|`POSTGRES_DB`
+|`demodb`
+|Base de datos creada automáticamente en la inicialización del cluster.
+
+|`TZ`
+|`America/Mexico_City`
+|Zona horaria del proceso dentro del contenedor. Los logs y `now()` reflejan hora local de México (CST/CDT).
+
+|`LANG`
+|`es_MX.utf8`
+|Locale del proceso del contenedor. Complementa la configuración compilada en la imagen (`localedef`) y establece el locale por defecto para el proceso de PostgreSQL.
+|===
+
+TIP: Renombrar el archivo `.env.template` a `.env`
+
+WARNING: El archivo `.env` contiene credenciales. Agregarlo a `.gitignore` para evitar que se versione.
+
+[source,zsh]
+----
+echo ".env" >> .gitignore
+----
+
+== Comandos de operación
+
+=== Construir la imagen y levantar el servicio
+
+[source,zsh]
+----
+# 1. Construir la imagen personalizada
+docker build -t postgres-mx:18.4 .
+
+# 2. Levantar el servicio en segundo plano
+docker compose -f dc_postgresql_mx.yml up -d
+
+# 3. Verificar estado y healthcheck
+docker compose -f dc_postgresql_mx.yml ps
+----
+
+=== Conectarse a la base de datos
+
+[source,zsh]
+----
+# Desde el host (requiere psql instalado)
+psql -h localhost -p 5432 -U demo -d demodb
+
+# Desde dentro del contenedor
+docker compose -f dc_postgresql_mx.yml exec bd_demo \
+  psql -U demo -d demodb
+----
+
+=== Detener y eliminar el servicio
+
+[source,zsh]
+----
+# Detener sin eliminar volúmenes
+docker compose -f dc_postgresql_mx.yml down
+
+# Detener y eliminar volúmenes (borra todos los datos)
+docker compose -f dc_postgresql_mx.yml down -v
+----
+
+=== 2. Crear la base de datos con locale español México
+
+[source,sql]
+----
+CREATE DATABASE direcciones_postales
+  ENCODING   'UTF8'
+  LC_COLLATE 'es_MX.UTF-8'
+  LC_CTYPE   'es_MX.UTF-8'
+  TEMPLATE   template0;
+----
+
+=== 3. Configurar el esquema y permisos
+
+Conectarse a la instancia vía Cloud SQL Auth Proxy o IP autorizada y ejecutar:
+
+[source,sql]
+----
+-- Restringir acceso público al esquema por defecto
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+
+-- Crear esquema de la aplicación
+CREATE SCHEMA IF NOT EXISTS direcciones;
+
+-- Otorgar acceso al usuario de la aplicación
+GRANT USAGE ON SCHEMA public TO app_demo;
+GRANT USAGE, CREATE ON SCHEMA direcciones TO app_demo;
+
+-- Privilegios por defecto para objetos futuros
+ALTER DEFAULT PRIVILEGES IN SCHEMA direcciones
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_demo;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA direcciones
+  GRANT USAGE, SELECT ON SEQUENCES TO app_demo;
+----
