@@ -1,0 +1,226 @@
+# ============================================================
+# Auto detect text files and perform LF normalization
+# ============================================================
+* text=auto eol=lf
+
+# ============================================================
+# Docker files
+# ============================================================
+Dockerfile             text eol=lf
+Dockerfile.*           text eol=lf
+*.dockerfile           text eol=lf
+.dockerignore          text eol=lf
+docker-compose.yml     text eol=lf
+docker-compose.yaml    text eol=lf
+docker-compose.*.yml   text eol=lf
+docker-compose.*.yaml  text eol=lf
+
+# ============================================================
+# Shell scripts (ALWAYS LF — critical for Linux execution)
+# ============================================================
+*.sh                   text eol=lf
+*.bash                 text eol=lf
+*.zsh                  text eol=lf
+*.fish                 text eol=lf
+*.ksh                  text eol=lf
+*.envrc                text eol=lf
+
+# Files without extension that are typically shell scripts
+entrypoint             text eol=lf
+entrypoint.sh          text eol=lf
+healthcheck            text eol=lf
+healthcheck.sh         text eol=lf
+init                   text eol=lf
+
+# ============================================================
+# Windows scripts (ALWAYS CRLF)
+# ============================================================
+*.bat                  text eol=crlf
+*.cmd                  text eol=crlf
+*.ps1                  text eol=crlf
+
+# ============================================================
+# AsciiDoc files
+# ============================================================
+*.adoc                 text diff=asciidoc
+*.asciidoc             text diff=asciidoc
+*.asc                  text diff=asciidoc
+
+# AsciiDoctor includes
+*.adoc.template        text
+
+# ============================================================
+# Configuration files (force LF for consistency)
+# ============================================================
+*.yml                  text eol=lf
+*.yaml                 text eol=lf
+*.json                 text
+*.toml                 text
+*.ini                  text
+*.conf                 text
+*.cfg                  text
+*.properties           text
+*.env                  text eol=lf
+.env.*                 text eol=lf
+
+# ============================================================
+# Documentation
+# ============================================================
+*.md                   text diff=markdown
+*.markdown             text diff=markdown
+*.txt                  text
+*.rst                  text
+README                 text
+LICENSE                text
+CHANGELOG              text
+AUTHORS                text
+CONTRIBUTORS           text
+NOTICE                 text
+COPYING                text
+INSTALL                text
+
+# ============================================================
+# Database / SQL
+# ============================================================
+*.sql                  text
+*.ddl                  text
+*.dml                  text
+
+# ============================================================
+# Source code (in case scripts include code references)
+# ============================================================
+*.py                   text diff=python
+*.rb                   text
+*.go                   text
+*.js                   text
+*.ts                   text
+*.java                 text diff=java
+*.groovy               text diff=groovy
+
+# ============================================================
+# Web files (if applicable)
+# ============================================================
+*.html                 text diff=html
+*.htm                  text diff=html
+*.css                  text diff=css
+
+# ============================================================
+# Binary files (do not modify line endings)
+# ============================================================
+
+# Archives
+*.7z                   binary
+*.gz                   binary
+*.tar                  binary
+*.tgz                  binary
+*.zip                  binary
+*.rar                  binary
+*.bz2                  binary
+*.xz                   binary
+
+# Images
+*.png                  binary
+*.jpg                  binary
+*.jpeg                 binary
+*.gif                  binary
+*.bmp                  binary
+*.tiff                 binary
+*.tif                  binary
+*.ico                  binary
+*.webp                 binary
+*.avif                 binary
+*.svg                  text
+
+# Fonts
+*.eot                  binary
+*.ttf                  binary
+*.otf                  binary
+*.woff                 binary
+*.woff2                binary
+
+# Documents
+*.pdf                  binary
+*.doc                  binary
+*.docx                 binary
+*.xls                  binary
+*.xlsx                 binary
+*.ppt                  binary
+*.pptx                 binary
+*.odt                  binary
+*.ods                  binary
+*.odp                  binary
+
+# Audio / Video
+*.mp3                  binary
+*.mp4                  binary
+*.mov                  binary
+*.avi                  binary
+*.wav                  binary
+*.flac                 binary
+*.ogg                  binary
+*.webm                 binary
+
+# Certificates and keystores (should be in gitignore anyway)
+*.p12                  binary
+*.pfx                  binary
+*.jks                  binary
+*.keystore             binary
+*.truststore           binary
+*.cer                  binary
+*.crt                  binary
+*.der                  binary
+
+# Other binaries
+*.dll                  binary
+*.so                   binary
+*.dylib                binary
+*.exe                  binary
+*.bin                  binary
+*.dat                  binary
+
+# ============================================================
+# Diff settings for specific file types
+# ============================================================
+
+# Better diffs for shell scripts
+*.sh                   diff=bash
+
+# Better diffs for Dockerfiles
+Dockerfile             diff=dockerfile
+Dockerfile.*           diff=dockerfile
+*.dockerfile           diff=dockerfile
+
+# ============================================================
+# Linguist overrides (GitHub language detection)
+# ============================================================
+
+# Mark vendored directories (not counted in language stats)
+vendor/*               linguist-vendored
+lib/external/*         linguist-vendored
+third-party/*          linguist-vendored
+
+# Mark documentation directories
+docs/*                 linguist-documentation
+documentation/*        linguist-documentation
+
+# Mark generated files
+*-generated.*          linguist-generated=true
+*.min.js               linguist-generated=true
+*.min.css              linguist-generated=true
+
+# ============================================================
+# Export-ignore (excluded from `git archive`)
+# ============================================================
+.gitignore             export-ignore
+.gitattributes         export-ignore
+.editorconfig          export-ignore
+.github/               export-ignore
+.gitlab/               export-ignore
+.gitlab-ci.yml         export-ignore
+.jenkins/              export-ignore
+Jenkinsfile            export-ignore
+tests/                 export-ignore
+test/                  export-ignore
+.dockerignore          export-ignore
+docker-compose.dev.yml export-ignore
+*.test.*               export-ignore
